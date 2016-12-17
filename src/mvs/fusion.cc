@@ -111,6 +111,30 @@ void StereoFusion::Run() {
               << std::flush;
 
     const auto& image_data = image_data_[image_id];
+
+    const DepthMap& depth_map = model_.depth_maps[image_id];
+    const NormalMap& normal_map = model_.normal_maps[image_id];
+    DepthMap fused_depth_map;
+    NormalMap fused_normal_map;
+    if (options_.output_fused_depth_maps) {
+      // Write filtered depth and normal maps to disk
+      fused_depth_map = DepthMap(depth_map.GetWidth(), depth_map.GetHeight(), depth_map.GetDepthMin(), depth_map.GetDepthMax());
+      fused_normal_map = NormalMap(normal_map.GetWidth(), normal_map.GetHeight());
+      fused_depth_map.Fill(0);
+      fused_normal_map.Fill(0);
+      // Set all pixels that have already been fused from another image
+      for (size_t row = 0; row < image_data.image->GetHeight(); ++row) {
+        for (size_t col = 0; col < image_data.image->GetWidth(); ++col) {
+          if (image_data.visited_mask.Get(row, col, 0)) {
+            fused_depth_map.Set(row, col, 0, depth_map.Get(row, col));
+            for (size_t channel = 0; channel < normal_map.GetDepth(); ++channel) {
+              fused_normal_map.Set(row, col, channel, normal_map.Get(row, col, channel));
+            }
+          }
+        }
+      }
+    }
+
     for (size_t row = 0; row < image_data.image->GetHeight(); ++row) {
       for (size_t col = 0; col < image_data.image->GetWidth(); ++col) {
         if (image_data.visited_mask.Get(row, col, 0)) {
@@ -146,11 +170,27 @@ void StereoFusion::Run() {
               std::round(static_cast<double>(fused_color_sum_.b) / num_pixels));
 
           fused_points_.push_back(fused_point);
+
+          if (options_.output_fused_depth_maps) {
+            fused_depth_map.Set(row, col, 0, depth_map.Get(row, col));
+            for (size_t channel = 0; channel < normal_map.GetDepth(); ++channel) {
+              fused_normal_map.Set(row, col, channel, normal_map.Get(row, col, channel));
+            }
+          }
         }
       }
     }
 
     std::cout << StringPrintf(" in %.3fs", timer.ElapsedSeconds()) << std::endl;
+
+    if (options_.output_fused_depth_maps) {
+      // Write filtered depth and normal maps to disk
+      const std::string image_name = model_.GetImageName(image_id);
+      const std::string file_name =
+      StringPrintf("%s.%s.fused.bin", image_name.c_str(), input_type_.c_str());
+      fused_depth_map.Write(JoinPaths(workspace_path_, "stereo/depth_maps", file_name));
+      fused_normal_map.Write(JoinPaths(workspace_path_, "stereo/normal_maps", file_name));
+    }
   }
 
   fused_points_.shrink_to_fit();

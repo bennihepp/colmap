@@ -100,6 +100,8 @@ class StereoFusionOptionsTab : public OptionsWidget {
                     "max_depth_error", 0, 1, 0.0001, 4);
     AddOptionDouble(&options->dense_mapper_options->fusion.max_normal_error,
                     "max_normal_error", 0, 180);
+    AddOptionBool(&options->dense_mapper_options->fusion.output_fused_depth_maps,
+                    "output_fused_depth_maps");
   }
 };
 

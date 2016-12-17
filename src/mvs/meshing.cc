@@ -69,6 +69,8 @@ bool PoissonReconstruction(const PoissonReconstructionOptions& options,
     args.push_back("--density");
   }
 
+  args.push_back("--verbose");
+
   std::vector<const char*> args_cstr;
   args_cstr.reserve(args.size());
   for (const auto& arg : args) {

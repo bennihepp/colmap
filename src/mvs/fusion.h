@@ -66,6 +66,9 @@ class StereoFusion : public Thread {
     // Maximum difference between normals of pixels to be fused.
     double max_normal_error = 10.0f;
 
+    // Output depth maps with only fused pixels
+    bool output_fused_depth_maps = false;
+
     // Check the options for validity.
     void Check() const;
 

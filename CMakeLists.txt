@@ -62,6 +62,7 @@ find_package(Eigen3 REQUIRED)
 find_package(FreeImage REQUIRED)
 
 find_package(Glog REQUIRED)
+find_package(Gflags REQUIRED)
 
 find_package(Ceres REQUIRED)
 

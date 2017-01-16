@@ -20,6 +20,7 @@
 #include <atomic>
 #include <climits>
 #include <functional>
+#include <chrono>
 #include <future>
 #include <list>
 #include <queue>
@@ -185,13 +186,25 @@ class ThreadPool {
   // Wait until tasks are finished.
   void Wait();
 
+  // Wait for some time until tasks are finished.
+  template <typename Rep, typename Period>
+  void Wait(const std::chrono::duration<Rep, Period>& rel_time) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    finished_condition_.wait_for(
+        lock, rel_time,
+        [this]() { return tasks_.empty() && num_active_workers_ == 0; });
+  }
+
+  int GetCurrentIndex() const;
+
  private:
-  void WorkerFunc();
+  void WorkerFunc(const int index);
 
   std::vector<std::thread> workers_;
   std::queue<std::function<void()>> tasks_;
+  std::unordered_map<std::thread::id, int> thread_id_to_index_map_;
 
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable task_condition_;
   std::condition_variable finished_condition_;
 

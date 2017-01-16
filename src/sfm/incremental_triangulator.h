@@ -126,11 +126,11 @@ class IncrementalTriangulator {
   // Clear the collection of changed 3D points.
   void ClearChangedPoints3D();
 
- private:
   // Data for a correspondence / element of a track, used to store all
   // relevant data for triangulation, in order to avoid duplicate lookup
   // in the underlying unordered_map's in the Reconstruction
   struct CorrData {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     image_t image_id;
     point2D_t point2D_idx;
     const Image* image;
@@ -139,6 +139,7 @@ class IncrementalTriangulator {
     Eigen::Matrix3x4d proj_matrix;
   };
 
+ private:
   // Clear cache of bogus camera parameters and merge trials.
   void ClearCaches();
 
@@ -186,5 +187,8 @@ class IncrementalTriangulator {
 };
 
 }  // namespace colmap
+
+EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION_CUSTOM(
+    colmap::IncrementalTriangulator::CorrData)
 
 #endif  // COLMAP_SRC_SFM_INCREMENTAL_TRIANGULATOR_H_

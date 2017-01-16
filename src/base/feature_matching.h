@@ -33,8 +33,11 @@
 namespace colmap {
 
 struct SiftMatchOptions {
-  // Number of threads for geometric verification.
+  // Number of threads for feature matching and geometric verification.
   int num_threads = ThreadPool::kMaxNumThreads;
+
+  // Whether to use the GPU for feature matching.
+  bool use_gpu = true;
 
   // Index of the GPU used for feature matching.
   int gpu_index = -1;
@@ -49,7 +52,7 @@ struct SiftMatchOptions {
   bool cross_check = true;
 
   // Maximum number of matches.
-  int max_num_matches = 8192;
+  int max_num_matches = 32768;
 
   // Maximum epipolar error in pixels for geometric verification.
   double max_error = 4.0;
@@ -57,8 +60,9 @@ struct SiftMatchOptions {
   // Confidence threshold for geometric verification.
   double confidence = 0.999;
 
-  // Maximum number of RANSAC iterations. Note that this option overrules
-  // the min_inlier_ratio option.
+  // Minimum/maximum number of RANSAC iterations. Note that this option
+  // overrules the min_inlier_ratio option.
+  int min_num_trials = 30;
   int max_num_trials = 10000;
 
   // A priori assumed minimum inlier ratio, which determines the maximum
@@ -87,14 +91,15 @@ class FeatureMatcherCache {
   const Image& GetImage(const image_t image_id) const;
   const FeatureKeypoints& GetKeypoints(const image_t image_id);
   const FeatureDescriptors& GetDescriptors(const image_t image_id);
+  FeatureMatches GetMatches(const image_t image_id1, const image_t image_id2);
 
   std::vector<image_t> GetImageIds() const;
 
  private:
-  std::mutex keypoints_cache_mutex_;
-  std::mutex descriptors_cache_mutex_;
-  std::unordered_map<camera_t, Camera> cameras_cache_;
-  std::unordered_map<image_t, Image> images_cache_;
+  const Database* database_;
+  std::mutex database_mutex_;
+  EIGEN_STL_UMAP(camera_t, Camera) cameras_cache_;
+  EIGEN_STL_UMAP(image_t, Image) images_cache_;
   std::unique_ptr<LRUCache<image_t, FeatureKeypoints>> keypoints_cache_;
   std::unique_ptr<LRUCache<image_t, FeatureDescriptors>> descriptors_cache_;
 };
@@ -104,10 +109,10 @@ class FeatureMatcherCache {
 // taking advantage of caching and database transactions, pass multiple images
 // to the `MatchImagePairs` function. Note that the database must not be in an
 // active transaction when calling `MatchImagePairs`.
-class SiftGPUFeatureMatcher {
+class SiftFeatureMatcher {
  public:
-  SiftGPUFeatureMatcher(const SiftMatchOptions& options, Database* database,
-                        FeatureMatcherCache* cache);
+  SiftFeatureMatcher(const SiftMatchOptions& options, Database* database,
+                     FeatureMatcherCache* cache);
 
   // Setup the feature matcher and return if successful.
   bool Setup();
@@ -125,14 +130,41 @@ class SiftGPUFeatureMatcher {
       const std::vector<std::pair<image_t, image_t>>& image_pairs);
 
  private:
-  struct GeometricVerificationData {
-    const Camera* camera1 = nullptr;
-    const Camera* camera2 = nullptr;
-    const FeatureKeypoints* keypoints1 = nullptr;
-    const FeatureKeypoints* keypoints2 = nullptr;
-    const FeatureMatches* matches = nullptr;
-    const TwoViewGeometry::Options* options = nullptr;
+  struct MatchResult {
+    image_t image_id1;
+    image_t image_id2;
+    FeatureMatches matches;
   };
+
+  struct InlierMatchResult {
+    image_t image_id1;
+    image_t image_id2;
+    TwoViewGeometry two_view_geometry;
+  };
+
+  struct GeometricVerificationData {
+    Camera camera1;
+    Camera camera2;
+    FeatureKeypoints keypoints1;
+    FeatureKeypoints keypoints2;
+    FeatureMatches matches;
+    TwoViewGeometry::Options options;
+  };
+
+  void MatchImagePairsCPU(
+      const std::vector<std::pair<image_t, image_t>>& image_pairs,
+      const std::vector<std::pair<bool, bool>>& exists_mask,
+      std::vector<MatchResult>* match_results,
+      std::vector<InlierMatchResult>* inlier_match_results);
+  void MatchImagePairsGPU(
+      const std::vector<std::pair<image_t, image_t>>& image_pairs,
+      const std::vector<std::pair<bool, bool>>& exists_mask,
+      std::vector<MatchResult>* match_results,
+      std::vector<InlierMatchResult>* inlier_match_results);
+
+  static void VerifyImagePair(const GeometricVerificationData data,
+                              const SiftMatchOptions& options,
+                              TwoViewGeometry* two_view_geometry);
 
   void GetGPUKeypoints(const int index, const image_t image_id,
                        const FeatureDescriptors* const descriptors_ptr,
@@ -141,19 +173,13 @@ class SiftGPUFeatureMatcher {
                          const FeatureDescriptors** descriptors_ptr);
   void ClearGPUData();
 
-  void MatchImagePairGuided(const image_t image_id1, const image_t image_id2,
-                            TwoViewGeometry* two_view_geometry);
-
-  static TwoViewGeometry VerifyImagePair(const GeometricVerificationData data,
-                                         const SiftMatchOptions& options);
-
   const SiftMatchOptions options_;
   Database* database_;
   FeatureMatcherCache* cache_;
 
   std::unique_ptr<OpenGLContextManager> opengl_context_;
   std::unique_ptr<SiftMatchGPU> sift_match_gpu_;
-  std::unique_ptr<ThreadPool> verifier_thread_pool_;
+  std::unique_ptr<ThreadPool> thread_pool_;
 
   // The previously uploaded images to the GPU.
   std::array<image_t, 2> prev_uploaded_image_ids_;
@@ -219,7 +245,7 @@ class ExhaustiveFeatureMatcher : public Thread {
   const SiftMatchOptions match_options_;
   Database database_;
   FeatureMatcherCache cache_;
-  SiftGPUFeatureMatcher matcher_;
+  SiftFeatureMatcher matcher_;
 };
 
 // Sequentially match images within neighborhood:
@@ -256,7 +282,7 @@ class SequentialFeatureMatcher : public Thread {
 
     // The maximum number of features to use for indexing an image. If an
     // image has more features, only the largest-scale features will be indexed.
-    int loop_detection_max_num_features = 1000;
+    int loop_detection_max_num_features = -1;
 
     // Path to the vocabulary tree.
     std::string vocab_tree_path = "";
@@ -279,7 +305,7 @@ class SequentialFeatureMatcher : public Thread {
   const SiftMatchOptions match_options_;
   Database database_;
   FeatureMatcherCache cache_;
-  SiftGPUFeatureMatcher matcher_;
+  SiftFeatureMatcher matcher_;
 };
 
 // Match each image against its nearest neighbors using a vocabulary tree.
@@ -291,7 +317,7 @@ class VocabTreeFeatureMatcher : public Thread {
 
     // The maximum number of features to use for indexing an image. If an
     // image has more features, only the largest-scale features will be indexed.
-    int max_num_features = 1000;
+    int max_num_features = -1;
 
     // Path to the vocabulary tree.
     std::string vocab_tree_path = "";
@@ -313,7 +339,7 @@ class VocabTreeFeatureMatcher : public Thread {
   const SiftMatchOptions match_options_;
   Database database_;
   FeatureMatcherCache cache_;
-  SiftGPUFeatureMatcher matcher_;
+  SiftFeatureMatcher matcher_;
 };
 
 // Match images against spatial nearest neighbors using prior location
@@ -349,7 +375,7 @@ class SpatialFeatureMatcher : public Thread {
   const SiftMatchOptions match_options_;
   Database database_;
   FeatureMatcherCache cache_;
-  SiftGPUFeatureMatcher matcher_;
+  SiftFeatureMatcher matcher_;
 };
 
 // Match images manually specified in a list of image pairs.
@@ -384,7 +410,7 @@ class ImagePairsFeatureMatcher : public Thread {
   const SiftMatchOptions match_options_;
   Database database_;
   FeatureMatcherCache cache_;
-  SiftGPUFeatureMatcher matcher_;
+  SiftFeatureMatcher matcher_;
 };
 
 // Import feature matches from a text file.
@@ -428,6 +454,18 @@ class FeaturePairsFeatureMatcher : public Thread {
   Database database_;
   FeatureMatcherCache cache_;
 };
+
+// Match the given SIFT features on the CPU.
+void MatchSiftFeaturesCPU(const SiftMatchOptions& match_options,
+                          const FeatureDescriptors& descriptors1,
+                          const FeatureDescriptors& descriptors2,
+                          FeatureMatches* matches);
+void MatchGuidedSiftFeaturesCPU(const SiftMatchOptions& match_options,
+                                const FeatureKeypoints& keypoints1,
+                                const FeatureKeypoints& keypoints2,
+                                const FeatureDescriptors& descriptors1,
+                                const FeatureDescriptors& descriptors2,
+                                TwoViewGeometry* two_view_geometry);
 
 // Create a SiftGPU feature matcher. Note that if CUDA is not available or the
 // gpu_index is -1, the OpenGLContextManager must be created in the main thread

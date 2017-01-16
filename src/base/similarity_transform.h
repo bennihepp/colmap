@@ -30,6 +30,8 @@ namespace colmap {
 // 3D similarity transformation with 7 degrees of freedom.
 class SimilarityTransform3 {
  public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
   SimilarityTransform3();
 
   SimilarityTransform3(const Eigen::Matrix3x4d& matrix);
@@ -58,5 +60,7 @@ class SimilarityTransform3 {
 };
 
 }  // namespace colmap
+
+EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION_CUSTOM(colmap::SimilarityTransform3)
 
 #endif  // COLMAP_SRC_BASE_SIMILARITY_TRANSFORM_H_

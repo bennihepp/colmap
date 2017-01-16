@@ -47,6 +47,8 @@ struct FusedPoint {
 
 class StereoFusion : public Thread {
  public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
   struct Options {
     // Minimum number of fused pixels to produce a point.
     int min_num_pixels = 3;
@@ -76,10 +78,9 @@ class StereoFusion : public Thread {
     void Print() const;
   };
 
-  StereoFusion(const Options& options,
-                        const std::string& workspace_path,
-                        const std::string& workspace_format,
-                        const std::string& input_type);
+  StereoFusion(const Options& options, const std::string& workspace_path,
+               const std::string& workspace_format,
+               const std::string& input_type);
 
   const std::vector<FusedPoint>& GetFusedPoints() const;
 
@@ -91,6 +92,7 @@ class StereoFusion : public Thread {
                  const size_t traversal_depth);
 
   struct ImageData {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     bool used = false;
     const Image* image = nullptr;
     const DepthMap* depth_map = nullptr;
@@ -128,7 +130,7 @@ class StereoFusion : public Thread {
   Model model_;
   std::vector<char> used_image_mask_;
   ConsistencyGraph consistency_graph_;
-  std::vector<ImageData> image_data_;
+  std::vector<ImageData, Eigen::aligned_allocator<ImageData>> image_data_;
   std::vector<FusedPoint> fused_points_;
 
   Eigen::Vector4f fused_ref_point_;

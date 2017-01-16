@@ -37,6 +37,8 @@ namespace colmap {
 // share a camera with multiple other images, if its intrinsics are the same.
 class Image {
  public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
   // The number of levels in the 3D point multi-resolution visibility pyramid.
   static const int kNumPoint3DVisibilityPyramidLevels = 6;
 
@@ -333,12 +335,16 @@ class Point2D& Image::Point2D(const point2D_t point2D_idx) {
   return points2D_.at(point2D_idx);
 }
 
-const std::vector<class Point2D>& Image::Points2D() const { return points2D_; }
+const std::vector<class Point2D>& Image::Points2D() const {
+  return points2D_;
+}
 
 bool Image::IsPoint3DVisible(const point2D_t point2D_idx) const {
   return num_correspondences_have_point3D_.at(point2D_idx) > 0;
 }
 
 }  // namespace colmap
+
+EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION_CUSTOM(colmap::Image)
 
 #endif  // COLMAP_SRC_BASE_IMAGE_H_

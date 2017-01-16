@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 
 project(COLMAP)
-add_definitions("-DCOLMAP_VERSION=\"2.0\"")
+add_definitions("-DCOLMAP_VERSION=\"2.1\"")
 
 
 ################################################################################
@@ -27,13 +27,16 @@ endif()
 # Options
 ################################################################################
 
-enable_testing()
-
 option(OPENMP_ENABLED "Whether to enable OpenMP" ON)
 option(LTO_ENABLED "Whether to enable link-time optimization" ON)
 option(CUDA_ENABLED "Whether to enable CUDA, if available" ON)
+option(TESTS_ENABLED "Whether to build test binaries" ON)
 option(PROFILING_ENABLED "Whether to enable google-perftools linker flags" OFF)
 option(BOOST_STATIC "Whether to enable static boost library linker flags" ON)
+
+if(TESTS_ENABLED)
+    enable_testing()
+endif()
 
 if(BOOST_STATIC)
     set(Boost_USE_STATIC_LIBS ON)

@@ -61,6 +61,8 @@ template <typename Estimator, typename SupportMeasurer = InlierSupportMeasurer,
 class RANSAC {
  public:
   struct Report {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     // Whether the estimation was successful.
     bool success = false;
 
@@ -209,13 +211,12 @@ RANSAC<Estimator, SupportMeasurer, Sampler>::Estimate(
         best_support = support;
         best_model = sample_model;
 
-        if (report.num_trials >= options_.min_num_trials) {
-          dyn_max_num_trials = ComputeNumTrials(
-              best_support.num_inliers, num_samples, options_.confidence);
-        }
+        dyn_max_num_trials = ComputeNumTrials(best_support.num_inliers,
+                                              num_samples, options_.confidence);
       }
 
-      if (report.num_trials >= dyn_max_num_trials) {
+      if (report.num_trials >= dyn_max_num_trials &&
+          report.num_trials >= options_.min_num_trials) {
         abort = true;
         break;
       }

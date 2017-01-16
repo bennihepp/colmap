@@ -1047,6 +1047,8 @@ void OptionManager::AddDenseMapperOptions() {
   ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
                      patch_match.gpu_index);
   ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
+                     patch_match.multi_gpu_indices);
+  ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
                      patch_match.window_radius);
   ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
                      patch_match.sigma_spatial);
@@ -1091,6 +1093,8 @@ void OptionManager::AddDenseMapperOptions() {
                      fusion.max_depth_error);
   ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
                      fusion.max_normal_error);
+  ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
+                     fusion.output_fused_depth_maps);
 
   ADD_OPTION_DEFAULT(DenseMapperOptions, dense_mapper_options,
                      poisson.point_weight);

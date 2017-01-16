@@ -17,6 +17,10 @@
 #include "mvs/patch_match.h"
 
 #include <cmath>
+#include <vector>
+#include <future>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "mvs/patch_match_cuda.h"
 #include "util/misc.h"
@@ -329,50 +333,132 @@ void PatchMatchController::Run() {
   const std::string output_suffix =
       options_.geom_consistency ? "geometric" : "photometric";
 
+  std::vector<int> gpu_indices;
+  if (options_.multi_gpu_indices.empty()) {
+    gpu_indices.push_back(options_.gpu_index);
+  }
+  else {
+    std::vector<std::string> strs;
+    boost::split(strs, options_.multi_gpu_indices, boost::is_any_of(" ,"));
+    for (const std::string& str : strs) {
+      gpu_indices.push_back(boost::lexical_cast<int>(str));
+      std::cout << "Using GPU " << gpu_indices.back() << std::endl;
+    }
+  }
+
+  std::vector<std::future<bool>> results;
+  ThreadPool thread_pool(gpu_indices.size());
   for (size_t i = 0; i < problems.size(); ++i) {
+    const auto loop_lambda = [&](const size_t index) {
+      const auto& problem = problems[index];
+
+      const std::string image_name = model.GetImageName(problem.ref_image_id);
+      const std::string file_name =
+          StringPrintf("%s.%s.bin", image_name.c_str(), output_suffix.c_str());
+      const std::string depth_map_path =
+          JoinPaths(workspace_path_, "stereo/depth_maps", file_name);
+      const std::string normal_map_path =
+          JoinPaths(workspace_path_, "stereo/normal_maps", file_name);
+      const std::string consistency_graph_path =
+          JoinPaths(workspace_path_, "stereo/consistency_graphs", file_name);
+
+      if (boost::filesystem::exists(depth_map_path) &&
+          boost::filesystem::exists(normal_map_path) &&
+          boost::filesystem::exists(consistency_graph_path)) {
+        return true;
+      }
+
+      PrintHeading1(
+          StringPrintf("Processing view %d / %d", index + 1, problems.size()));
+
+      problem.Print();
+
+      PatchMatch::Options patch_match_options = options_;
+      patch_match_options.depth_min = depth_ranges.at(problem.ref_image_id).first;
+      patch_match_options.depth_max =
+          depth_ranges.at(problem.ref_image_id).second;
+      patch_match_options.Print();
+
+      int current_thread_index = thread_pool.GetCurrentIndex();
+      int current_gpu_index = gpu_indices[current_thread_index];
+      PatchMatch::Options current_options = patch_match_options;
+      current_options.gpu_index = current_gpu_index;
+      PatchMatch patch_match(current_options, problem);
+      patch_match.Run();
+
+      std::cout << std::endl << "Writing output: " << file_name << std::endl;
+
+      patch_match.GetDepthMap().Write(depth_map_path);
+      patch_match.GetNormalMap().Write(normal_map_path);
+      WriteBinaryBlob(consistency_graph_path,
+                      patch_match.GetConsistentImageIds());
+      return true;
+    };
+    std::future<bool> result = thread_pool.AddTask(loop_lambda, i);
+    results.push_back(std::move(result));
+  }
+
+  std::size_t results_done = 0;
+  while (results_done < problems.size()) {
     if (IsStopped()) {
       break;
     }
-
-    const auto& problem = problems[i];
-
-    const std::string image_name = model.GetImageName(problem.ref_image_id);
-    const std::string file_name =
-        StringPrintf("%s.%s.bin", image_name.c_str(), output_suffix.c_str());
-    const std::string depth_map_path =
-        JoinPaths(workspace_path_, "stereo/depth_maps", file_name);
-    const std::string normal_map_path =
-        JoinPaths(workspace_path_, "stereo/normal_maps", file_name);
-    const std::string consistency_graph_path =
-        JoinPaths(workspace_path_, "stereo/consistency_graphs", file_name);
-
-    if (boost::filesystem::exists(depth_map_path) &&
-        boost::filesystem::exists(normal_map_path) &&
-        boost::filesystem::exists(consistency_graph_path)) {
-      continue;
+    thread_pool.Wait(std::chrono::seconds(1));
+    for (auto it = results.begin(); it != results.end();) {
+      if (it->wait_for(std::chrono::milliseconds(10)) == std::future_status::ready) {
+        ++results_done;
+        it = results.erase(it);
+      }
+      else {
+        ++it;
+      }
     }
-
-    PrintHeading1(
-        StringPrintf("Processing view %d / %d", i + 1, problems.size()));
-
-    problem.Print();
-
-    PatchMatch::Options patch_match_options = options_;
-    patch_match_options.depth_min = depth_ranges.at(problem.ref_image_id).first;
-    patch_match_options.depth_max =
-        depth_ranges.at(problem.ref_image_id).second;
-    patch_match_options.Print();
-
-    PatchMatch patch_match(patch_match_options, problem);
-    patch_match.Run();
-
-    std::cout << std::endl << "Writing output: " << file_name << std::endl;
-
-    patch_match.GetDepthMap().Write(depth_map_path);
-    patch_match.GetNormalMap().Write(normal_map_path);
-    WriteBinaryBlob(consistency_graph_path,
-                    patch_match.GetConsistentImageIds());
   }
+
+//  for (size_t i = 0; i < problems.size(); ++i) {
+//    if (IsStopped()) {
+//      break;
+//    }
+//
+//    const auto& problem = problems[i];
+//
+//    const std::string image_name = model.GetImageName(problem.ref_image_id);
+//    const std::string file_name =
+//        StringPrintf("%s.%s.bin", image_name.c_str(), output_suffix.c_str());
+//    const std::string depth_map_path =
+//        JoinPaths(workspace_path_, "stereo/depth_maps", file_name);
+//    const std::string normal_map_path =
+//        JoinPaths(workspace_path_, "stereo/normal_maps", file_name);
+//    const std::string consistency_graph_path =
+//        JoinPaths(workspace_path_, "stereo/consistency_graphs", file_name);
+//
+//    if (boost::filesystem::exists(depth_map_path) &&
+//        boost::filesystem::exists(normal_map_path) &&
+//        boost::filesystem::exists(consistency_graph_path)) {
+//      continue;
+//    }
+//
+//    PrintHeading1(
+//        StringPrintf("Processing view %d / %d", i + 1, problems.size()));
+//
+//    problem.Print();
+//
+//    PatchMatch::Options patch_match_options = options_;
+//    patch_match_options.depth_min = depth_ranges.at(problem.ref_image_id).first;
+//    patch_match_options.depth_max =
+//        depth_ranges.at(problem.ref_image_id).second;
+//    patch_match_options.Print();
+//
+//    PatchMatch patch_match(patch_match_options, problem);
+//    patch_match.Run();
+//
+//    std::cout << std::endl << "Writing output: " << file_name << std::endl;
+//
+//    patch_match.GetDepthMap().Write(depth_map_path);
+//    patch_match.GetNormalMap().Write(normal_map_path);
+//    WriteBinaryBlob(consistency_graph_path,
+//                    patch_match.GetConsistentImageIds());
+//  }
 
   GetTimer().PrintMinutes();
 }

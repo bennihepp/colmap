@@ -48,6 +48,9 @@ class PatchMatch {
     // Index of the GPU used for patch match.
     int gpu_index = -1;
 
+    // If multiple GPUs should be used this is a list of indices separated by comma
+    std::string multi_gpu_indices = "";
+
     // Depth range in which to randomly sample depth hypotheses.
     double depth_min = 0.0f;
     double depth_max = 1.0f;
